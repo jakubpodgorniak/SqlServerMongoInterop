@@ -14,6 +14,7 @@ const double MostWestLat = 6.026129589265816;
 const double MostEastLat = 14.540386639801365;
 
 using SqlConnection connection = new ("Server=.\\SQLEXPRESS;Database=ServicePortal4;Integrated Security=true;");
+connection.Open();
 
 var client = new MongoClient("mongodb://localhost:27017");
 var db =  client.GetDatabase("ServicePortal");
@@ -22,7 +23,8 @@ var collection = db.GetCollection<Offer>("Offers");
 var faker = new Faker();
 var random = new Random();
 
-GenerateSqlOffersFromNoSql();
+//GenerateSqlOffersFromNoSql();
+//InsertNewRandomOffers(count: 1000, repeats: 100);
 
 async Task GenerateSqlOffersFromNoSql()
 {
@@ -30,34 +32,56 @@ async Task GenerateSqlOffersFromNoSql()
 
     const int BufferSize = 100000;
 
-    SqlOffer[] sqlOffer = new SqlOffer[BufferSize];
-    for (int i = 0; i < sqlOffer.Length; i++)
-    {
-        sqlOffer[i] = new();
-    }
-
     DataTable table = new DataTable();
+    table.Columns.Add("Name", typeof(string));
+    table.Columns.Add("Location", typeof(SqlGeography));
+    table.Columns.Add("Rating", typeof(int));
+    table.Columns.Add("Active", typeof(bool));
+    table.Columns.Add("OfferDetailsId", typeof(byte[]));
 
     foreach (var offer in collection.AsQueryable())
     {
-        int sqlOffersCount = 0;
+        table.Rows.Add(
+            offer.Name,
+            SqlGeography.Point(offer.Location.Coordinates.Latitude, offer.Location.Coordinates.Longitude, 4326),
+            offer.Rating,
+            offer.Active,
+            offer.Id.ToByteArray());
 
-        sqlOffer.Name = offer.Name;
-        sqlOffer.Location = SqlGeography.Point(offer.Location.Coordinates.Latitude, offer.Location.Coordinates.Longitude, 4326);
-        sqlOffer.Rating = offer.Rating;
-        sqlOffer.Active = offer.Active;
-        sqlOffer.OfferDetailsId = offer.Id.ToByteArray();
-
-        try
+        if (table.Rows.Count == BufferSize)
         {
+            using var innerBulkCopy = new SqlBulkCopy(connection);
+            innerBulkCopy.DestinationTableName = "Offers";
+            innerBulkCopy.ColumnMappings.Add("Name", "Name");
+            innerBulkCopy.ColumnMappings.Add("Location", "Location");
+            innerBulkCopy.ColumnMappings.Add("Rating", "Rating");
+            innerBulkCopy.ColumnMappings.Add("Active", "Active");
+            innerBulkCopy.ColumnMappings.Add("OfferDetailsId", "OfferDetailsId");
 
-        connection.Execute(@"Insert Offers(Name, Location, Active, Rating, OfferDetailsId) Values(@Name, @Location, @Rating, @Active, @OfferDetailsId)", sqlOffer);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine();
+            try
+            {
+                innerBulkCopy.WriteToServer(table);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+                throw;
+            }
+
+            table.Clear();
         }
     }
+
+    using var bulkCopy = new SqlBulkCopy(connection);
+    bulkCopy.DestinationTableName = "Offers";
+    bulkCopy.ColumnMappings.Add("Name", "Name");
+    bulkCopy.ColumnMappings.Add("Location", "Location");
+    bulkCopy.ColumnMappings.Add("Rating", "Rating");
+    bulkCopy.ColumnMappings.Add("Active", "Active");
+    bulkCopy.ColumnMappings.Add("OfferDetailsId", "OfferDetailsId");
+    bulkCopy.WriteToServer(table);
+
+    table.Clear();
 
     sw.Stop();
 }
