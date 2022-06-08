@@ -7,11 +7,12 @@ using Microsoft.SqlServer.Types;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using MongoDB.Driver.GeoJsonObjectModel;
+using static System.Console;
 
-const double MostSouthLong = 47.48667229881244;
-const double MostNorthLong = 54.84800488971114;
-const double MostWestLat = 6.026129589265816;
-const double MostEastLat = 14.540386639801365;
+const double MostSouthLat = 47.48667229881244;
+const double MostNorthLat = 54.84800488971114;
+const double MostWestLong = 6.026129589265816;
+const double MostEastLong = 14.540386639801365;
 
 using SqlConnection connection = new ("Server=.\\SQLEXPRESS;Database=ServicePortal4;Integrated Security=true;");
 connection.Open();
@@ -24,7 +25,70 @@ var faker = new Faker();
 var random = new Random();
 
 //GenerateSqlOffersFromNoSql();
-//InsertNewRandomOffers(count: 1000, repeats: 100);
+//InsertNewRandomOffers(count: 10000, repeats: 200);
+GenerateCategories();
+
+//RepeatTest(() => Test1_GetAllOffersInRadius(10000, 51.380155, 12.493470), 10);
+//RepeatTest(() => Test1_GetAllOffersInRadius(50000, 51.380155, 12.493470), 10);
+//RepeatTest(() => Test2_GetClosestsOffers(100, 51.380155, 12.493470), 10);
+//RepeatTest(() => Test2_GetClosestsOffers(1000, 51.380155, 12.493470), 10);
+
+double Test1_GetAllOffersInRadius(int radiusMeters, double latitude, double longitude)
+{
+    var sw = Stopwatch.StartNew();
+
+    var center = SqlGeography.Point(latitude, longitude, 4326);
+    var mongoIds = connection.Query<byte[]>(
+        "SELECT OfferDetailsId FROM Offers WHERE Location.STDistance(@Center) <= @Radius",
+        new { Center = center, Radius = radiusMeters }).Select(bytes => new ObjectId(bytes));
+    var filter = Builders<Offer>.Filter.In("_id", mongoIds);
+    var offers = collection.Find(filter);
+
+    sw.Stop();
+
+    WriteLine($"Get all offers({offers.CountDocuments()}) in {radiusMeters}m radius: {sw.Elapsed.TotalMilliseconds}ms");
+    WriteLine($"First offer: {offers.First().Name}");
+
+    return sw.Elapsed.TotalMilliseconds;
+}
+
+double Test2_GetClosestsOffers(int number, double latitude, double longitude)
+{
+    var sw = Stopwatch.StartNew();
+
+    var center = SqlGeography.Point(latitude, longitude, 4326);
+    var mongoIds = connection.Query<byte[]>(
+        @"SELECT TOP (@Number) OfferDetailsId 
+          FROM Offers
+          WHERE Location.STDistance(@Center) IS NOT NULL
+          ORDER BY Location.STDistance(@Center)",
+        new { Number = number, Center = center }).Select(bytes => new ObjectId(bytes));
+
+    var filter = Builders<Offer>.Filter.In("_id", mongoIds);
+    var offers = collection.Find(filter);
+
+    sw.Stop();
+
+    WriteLine($"Get {number} closests offers: {sw.Elapsed.TotalMilliseconds}ms");
+    WriteLine($"First offer: {offers.First().Name}");
+
+    return sw.Elapsed.TotalMilliseconds;
+}
+
+void RepeatTest(Func<double> test, int repeats)
+{
+    double millisecondsSum = 0.0;
+
+    for (int i = 0; i < repeats; i++)
+    {
+        millisecondsSum += test();
+    }
+
+    double avg = millisecondsSum / repeats;
+
+    WriteLine($"Average time over {repeats} repeats: {avg}ms");
+    WriteLine();
+}
 
 async Task GenerateSqlOffersFromNoSql()
 {
@@ -64,7 +128,7 @@ async Task GenerateSqlOffersFromNoSql()
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex.Message);
+                WriteLine(ex.Message);
                 throw;
             }
 
@@ -99,7 +163,7 @@ void InsertNewRandomOffers(int count, int repeats)
     {
         for (int j = 0; j < count; j++)
         {
-            var (longitude, latitude) = GenerateRandomGeography(random, MostSouthLong, MostNorthLong, MostWestLat, MostEastLat);
+            var (latitude, longitude) = GenerateRandomGeography(random, MostWestLong, MostEastLong, MostSouthLat, MostNorthLat);
             offers[j].Id = ObjectId.Empty;
             offers[j].Name = faker.Commerce.ProductName();
             offers[j].Description = faker.Commerce.ProductDescription();
@@ -112,15 +176,57 @@ void InsertNewRandomOffers(int count, int repeats)
     }
 }
 
-(double longitude, double latitude) GenerateRandomGeography(Random random, double minLong, double maxLong, double minLat, double maxLat)
+(double latitude, double longitude) GenerateRandomGeography(Random random, double minLong, double maxLong, double minLat, double maxLat)
 {
-    var longitude = random.NextDouble() * (maxLong - minLong) + minLong;
     var latitude = random.NextDouble() * (maxLat - minLat) + minLat;
+    var longitude = random.NextDouble() * (maxLong - minLong) + minLong;
 
-    return (longitude, latitude);
+    return (latitude, longitude);
 }
 
-Console.WriteLine();
+void DeleteAllCategories()
+{
+    connection.Execute("DELETE FROM CategoriesLevel3");
+    connection.Execute("DELETE FROM CategoriesLevel2");
+    connection.Execute("DELETE FROM CategoriesLevel1");
+}
+
+void GenerateCategories()
+{
+    const int CategoriesLevel1Count = 20;
+    const int CategoriesLevel2Count = 10;
+    const int CategoriesLevel3Count = 5;
+
+    var categoriesLevel1 = new List<CategoryLevel1>(CategoriesLevel1Count);
+
+    for (int i = 0; i < CategoriesLevel1Count; i++)
+    {
+        categoriesLevel1.Add(new() { Name = $"Category_{i + 1}", HasSubcategories = true});
+    }
+    connection.Execute("INSERT INTO CategoriesLevel1(Name, HasSubcategories) VALUES (@Name, @HasSubcategories)", categoriesLevel1);
+
+    foreach (var categoryLevel1 in connection.Query<CategoryLevel1>("SELECT * FROM CategoriesLevel1"))
+    {
+        var categoriesLevel2 = new List<CategoryLevel2>(CategoriesLevel2Count);
+        for (int i = 0; i < CategoriesLevel2Count; i++)
+        {
+            categoriesLevel2.Add(new() { Name = $"{categoryLevel1.Name}_{i + 1}", HasSubcategories = true, CategoryLevel1Id = categoryLevel1.Id });
+        }
+
+        connection.Execute("INSERT INTO CategoriesLevel2(Name, HasSubcategories, CategoryLevel1Id) VALUES (@Name, @HasSubcategories, @CategoryLevel1Id)", categoriesLevel2);
+    }
+
+    foreach (var categoryLevel2 in connection.Query<CategoryLevel2>("SELECT * FROM CategoriesLevel2"))
+    {
+        var categoriesLevel3 = new List<CategoryLevel3>(CategoriesLevel3Count);
+        for (int i = 0; i < CategoriesLevel3Count; i++)
+        {
+            categoriesLevel3.Add(new() { Name = $"{categoryLevel2.Name}_{i + 1}", CategoryLevel2Id = categoryLevel2.Id });
+        }
+
+        connection.Execute("INSERT INTO CategoriesLevel3(Name, CategoryLevel2Id) VALUES (@Name, @CategoryLevel2Id)", categoriesLevel3);
+    }
+}
 
 class Offer
 {
@@ -137,17 +243,31 @@ class Offer
     public bool Active { get; set; }
 }
 
-class SqlOffer
+class CategoryLevel1
 {
     public int Id { get; set; }
 
     public string Name { get; set; }
 
-    public SqlGeography Location { get; set; }
+    public bool HasSubcategories { get; set; }
+}
 
-    public int Rating { get; set; }
+class CategoryLevel2
+{
+    public int Id { get; set; }
 
-    public bool Active { get; set; }
+    public string Name { get; set; }
 
-    public byte[] OfferDetailsId { get; set; }
+    public bool HasSubcategories { get; set; }
+
+    public int CategoryLevel1Id { get; set; }
+}
+
+class CategoryLevel3
+{
+    public int Id { get; set; }
+
+    public string Name { get; set; }
+
+    public int CategoryLevel2Id { get; set; }
 }
