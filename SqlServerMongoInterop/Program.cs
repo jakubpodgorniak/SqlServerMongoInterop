@@ -32,7 +32,10 @@ var random = new Random();
 //RepeatTest(() => Test1_GetAllOffersInRadius(10000, 51.380155, 12.493470), 10);
 //RepeatTest(() => Test1_GetAllOffersInRadius(50000, 51.380155, 12.493470), 10);
 //RepeatTest(() => Test1_GetAllOffersInRadius(100000, 51.380155, 12.493470), 10);
-RepeatTest(() => Test2_GetClosestsOffers(10, 51.380155, 12.493470), 10);
+RepeatTest(() => Test2_GetClosestsOffers(100, 51.380155, 12.493470), 10);
+RepeatTest(() => Test5_GetAllOffersInRadiusWithLevel3Category(10000, 37, 51.380155, 12.493470), 10);
+RepeatTest(() => Test5_GetAllOffersInRadiusWithLevel3Category(50000, 37, 51.380155, 12.493470), 10);
+RepeatTest(() => Test5_GetAllOffersInRadiusWithLevel3Category(100000, 37, 51.380155, 12.493470), 10);
 //RepeatTest(() => Test2_GetClosestsOffers(100, 51.380155, 12.493470), 10);
 //RepeatTest(() => Test2_GetClosestsOffers(1000, 51.380155, 12.493470), 10);
 
@@ -84,13 +87,49 @@ double Test3_GetAllOffersInRadiusWithLevel1Category(int radiusMeters, int level1
  
     var center = SqlGeography.Point(latitude, longitude, 4326);
     var mongoIds = connection.Query<byte[]>(
-        "SELECT OfferDetailsId FROM Offers WHERE Location.STDistance(@Center) <= @Radius",
-        new { Center = center, Radius = radiusMeters }).Select(bytes => new ObjectId(bytes));
+        "SELECT OfferDetailsId FROM Offers WHERE CategoryLevel1Id = @Category AND Location.STDistance(@Center) <= @Radius",
+        new { Category = level1Category, Center = center, Radius = radiusMeters }).Select(bytes => new ObjectId(bytes));
     var filter = Builders<Offer>.Filter.In("_id", mongoIds);
     var offers = collection.Find(filter);
     sw.Stop();
 
-    WriteLine($"Get all offers({offers.CountDocuments()}) in {radiusMeters}m with category {level1Category}: {sw.Elapsed.TotalMilliseconds}ms");
+    WriteLine($"Get all offers({offers.CountDocuments()}) in {radiusMeters}m with level 1 category {level1Category}: {sw.Elapsed.TotalMilliseconds}ms");
+    WriteLine($"First offer: {offers.First().Name}");
+
+    return sw.Elapsed.TotalMilliseconds;
+}
+
+double Test4_GetAllOffersInRadiusWithLevel2Category(int radiusMeters, int level2Category, double latitude, double longitude)
+{
+    var sw = Stopwatch.StartNew();
+
+    var center = SqlGeography.Point(latitude, longitude, 4326);
+    var mongoIds = connection.Query<byte[]>(
+        "SELECT OfferDetailsId FROM Offers WHERE CategoryLevel2Id = @Category AND Location.STDistance(@Center) <= @Radius",
+        new { Category = level2Category, Center = center, Radius = radiusMeters }).Select(bytes => new ObjectId(bytes));
+    var filter = Builders<Offer>.Filter.In("_id", mongoIds);
+    var offers = collection.Find(filter);
+    sw.Stop();
+
+    WriteLine($"Get all offers({offers.CountDocuments()}) in {radiusMeters}m with level 2 category {level2Category}: {sw.Elapsed.TotalMilliseconds}ms");
+    WriteLine($"First offer: {offers.First().Name}");
+
+    return sw.Elapsed.TotalMilliseconds;
+}
+
+double Test5_GetAllOffersInRadiusWithLevel3Category(int radiusMeters, int level3Category, double latitude, double longitude)
+{
+    var sw = Stopwatch.StartNew();
+
+    var center = SqlGeography.Point(latitude, longitude, 4326);
+    var mongoIds = connection.Query<byte[]>(
+        "SELECT OfferDetailsId FROM Offers WHERE CategoryLevel3Id = @Category AND Location.STDistance(@Center) <= @Radius",
+        new { Category = level3Category, Center = center, Radius = radiusMeters }).Select(bytes => new ObjectId(bytes));
+    var filter = Builders<Offer>.Filter.In("_id", mongoIds);
+    var offers = collection.Find(filter);
+    sw.Stop();
+
+    WriteLine($"Get all offers({offers.CountDocuments()}) in {radiusMeters}m with level 3 category {level3Category}: {sw.Elapsed.TotalMilliseconds}ms");
     WriteLine($"First offer: {offers.First().Name}");
 
     return sw.Elapsed.TotalMilliseconds;
