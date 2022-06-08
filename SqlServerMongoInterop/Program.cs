@@ -26,12 +26,13 @@ var random = new Random();
 
 //GenerateSqlOffersFromNoSql();
 //InsertNewRandomOffers(count: 10000, repeats: 200);
-GenerateCategories();
+//GenerateCategories();
+//AssignRandomCategories();
 
-//RepeatTest(() => Test1_GetAllOffersInRadius(10000, 51.380155, 12.493470), 10);
-//RepeatTest(() => Test1_GetAllOffersInRadius(50000, 51.380155, 12.493470), 10);
-//RepeatTest(() => Test2_GetClosestsOffers(100, 51.380155, 12.493470), 10);
-//RepeatTest(() => Test2_GetClosestsOffers(1000, 51.380155, 12.493470), 10);
+RepeatTest(() => Test1_GetAllOffersInRadius(10000, 51.380155, 12.493470), 10);
+RepeatTest(() => Test1_GetAllOffersInRadius(50000, 51.380155, 12.493470), 10);
+RepeatTest(() => Test2_GetClosestsOffers(100, 51.380155, 12.493470), 10);
+RepeatTest(() => Test2_GetClosestsOffers(1000, 51.380155, 12.493470), 10);
 
 double Test1_GetAllOffersInRadius(int radiusMeters, double latitude, double longitude)
 {
@@ -176,6 +177,73 @@ void InsertNewRandomOffers(int count, int repeats)
     }
 }
 
+void AssignRandomCategories()
+{
+    var table = new DataTable();
+    table.Columns.Add("CategoryLevel1Id", typeof(int));
+    table.Columns.Add("CategoryLevel2Id", typeof(int));
+    table.Columns.Add("CategoryLevel3Id", typeof(int));
+
+    var categoriesIdsSequences = connection.Query<CategoryIdSequence>(
+        @"SELECT a.Id AS Level1Id, b.Id AS Level2Id, c.Id AS Level3Id
+          FROM CategoriesLevel3 c 
+            INNER JOIN CategoriesLevel2 b ON c.CategoryLevel2Id = b.Id
+            INNER JOIN CategoriesLevel1 a ON b.CategoryLevel1Id = a.Id").ToList();
+    var offersCount = connection.ExecuteScalar<int>("SELECT COUNT(*) FROM Offers");
+
+    for (int i = 0; i < offersCount; i++)
+    {
+        var sequence = categoriesIdsSequences[random.Next(0, categoriesIdsSequences.Count)];
+
+        table.Rows.Add(sequence.Level1Id, sequence.Level2Id, sequence.Level3Id);
+    }
+
+
+    Console.WriteLine();
+    //public static void UpdateData<T>(List<T> list, string TableName)
+    //{
+    //    DataTable dt = new DataTable("MyTable");
+    //    dt = ConvertToDataTable(list);
+
+    //    using (SqlConnection conn = new SqlConnection(ConfigurationManager.ConnectionStrings["SchoolSoulDataEntitiesForReport"].ConnectionString))
+    //    {
+    //        using (SqlCommand command = new SqlCommand("", conn))
+    //        {
+    //            try
+    //            {
+    //                conn.Open();
+
+    //                //Creating temp table on database
+    //                command.CommandText = "CREATE TABLE #TmpTable(...)";
+    //                command.ExecuteNonQuery();
+
+    //                //Bulk insert into temp table
+    //                using (SqlBulkCopy bulkcopy = new SqlBulkCopy(conn))
+    //                {
+    //                    bulkcopy.BulkCopyTimeout = 660;
+    //                    bulkcopy.DestinationTableName = "#TmpTable";
+    //                    bulkcopy.WriteToServer(dt);
+    //                    bulkcopy.Close();
+    //                }
+
+    //                // Updating destination table, and dropping temp table
+    //                command.CommandTimeout = 300;
+    //                command.CommandText = "UPDATE T SET ... FROM " + TableName + " T INNER JOIN #TmpTable Temp ON ...; DROP TABLE #TmpTable;";
+    //                command.ExecuteNonQuery();
+    //            }
+    //            catch (Exception ex)
+    //            {
+    //                // Handle exception properly
+    //            }
+    //            finally
+    //            {
+    //                conn.Close();
+    //            }
+    //        }
+    //    }
+    //}
+}
+
 (double latitude, double longitude) GenerateRandomGeography(Random random, double minLong, double maxLong, double minLat, double maxLat)
 {
     var latitude = random.NextDouble() * (maxLat - minLat) + minLat;
@@ -270,4 +338,13 @@ class CategoryLevel3
     public string Name { get; set; }
 
     public int CategoryLevel2Id { get; set; }
+}
+
+class CategoryIdSequence
+{
+    public int Level1Id { get; set; }
+
+    public int Level2Id { get; set; }
+
+    public int Level3Id { get; set;}
 }
