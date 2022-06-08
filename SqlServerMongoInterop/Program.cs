@@ -29,10 +29,12 @@ var random = new Random();
 //GenerateCategories();
 //AssignRandomCategories();
 
-RepeatTest(() => Test1_GetAllOffersInRadius(10000, 51.380155, 12.493470), 10);
-RepeatTest(() => Test1_GetAllOffersInRadius(50000, 51.380155, 12.493470), 10);
-RepeatTest(() => Test2_GetClosestsOffers(100, 51.380155, 12.493470), 10);
-RepeatTest(() => Test2_GetClosestsOffers(1000, 51.380155, 12.493470), 10);
+//RepeatTest(() => Test1_GetAllOffersInRadius(10000, 51.380155, 12.493470), 10);
+//RepeatTest(() => Test1_GetAllOffersInRadius(50000, 51.380155, 12.493470), 10);
+//RepeatTest(() => Test1_GetAllOffersInRadius(100000, 51.380155, 12.493470), 10);
+RepeatTest(() => Test2_GetClosestsOffers(10, 51.380155, 12.493470), 10);
+//RepeatTest(() => Test2_GetClosestsOffers(100, 51.380155, 12.493470), 10);
+//RepeatTest(() => Test2_GetClosestsOffers(1000, 51.380155, 12.493470), 10);
 
 double Test1_GetAllOffersInRadius(int radiusMeters, double latitude, double longitude)
 {
@@ -71,6 +73,24 @@ double Test2_GetClosestsOffers(int number, double latitude, double longitude)
     sw.Stop();
 
     WriteLine($"Get {number} closests offers: {sw.Elapsed.TotalMilliseconds}ms");
+    WriteLine($"First offer: {offers.First().Name}");
+
+    return sw.Elapsed.TotalMilliseconds;
+}
+
+double Test3_GetAllOffersInRadiusWithLevel1Category(int radiusMeters, int level1Category, double latitude, double longitude)
+{
+    var sw = Stopwatch.StartNew();
+ 
+    var center = SqlGeography.Point(latitude, longitude, 4326);
+    var mongoIds = connection.Query<byte[]>(
+        "SELECT OfferDetailsId FROM Offers WHERE Location.STDistance(@Center) <= @Radius",
+        new { Center = center, Radius = radiusMeters }).Select(bytes => new ObjectId(bytes));
+    var filter = Builders<Offer>.Filter.In("_id", mongoIds);
+    var offers = collection.Find(filter);
+    sw.Stop();
+
+    WriteLine($"Get all offers({offers.CountDocuments()}) in {radiusMeters}m with category {level1Category}: {sw.Elapsed.TotalMilliseconds}ms");
     WriteLine($"First offer: {offers.First().Name}");
 
     return sw.Elapsed.TotalMilliseconds;
@@ -180,68 +200,46 @@ void InsertNewRandomOffers(int count, int repeats)
 void AssignRandomCategories()
 {
     var table = new DataTable();
-    table.Columns.Add("CategoryLevel1Id", typeof(int));
-    table.Columns.Add("CategoryLevel2Id", typeof(int));
-    table.Columns.Add("CategoryLevel3Id", typeof(int));
+    table.Columns.Add("OfferId", typeof(int));
+    table.Columns.Add("Level1Id", typeof(int));
+    table.Columns.Add("Level2Id", typeof(int));
+    table.Columns.Add("Level3Id", typeof(int));
 
     var categoriesIdsSequences = connection.Query<CategoryIdSequence>(
         @"SELECT a.Id AS Level1Id, b.Id AS Level2Id, c.Id AS Level3Id
           FROM CategoriesLevel3 c 
             INNER JOIN CategoriesLevel2 b ON c.CategoryLevel2Id = b.Id
             INNER JOIN CategoriesLevel1 a ON b.CategoryLevel1Id = a.Id").ToList();
-    var offersCount = connection.ExecuteScalar<int>("SELECT COUNT(*) FROM Offers");
+    var offersIds = connection.Query<int>("SELECT Id FROM Offers").ToList();
 
-    for (int i = 0; i < offersCount; i++)
+    for (int i = 0; i < offersIds.Count; i++)
     {
         var sequence = categoriesIdsSequences[random.Next(0, categoriesIdsSequences.Count)];
 
-        table.Rows.Add(sequence.Level1Id, sequence.Level2Id, sequence.Level3Id);
+        table.Rows.Add(offersIds[i], sequence.Level1Id, sequence.Level2Id, sequence.Level3Id);
     }
 
+    connection.Execute("CREATE TABLE #TmpTable(OfferId int, Level1Id int, Level2Id int, Level3Id int)");
 
-    Console.WriteLine();
-    //public static void UpdateData<T>(List<T> list, string TableName)
-    //{
-    //    DataTable dt = new DataTable("MyTable");
-    //    dt = ConvertToDataTable(list);
-
-    //    using (SqlConnection conn = new SqlConnection(ConfigurationManager.ConnectionStrings["SchoolSoulDataEntitiesForReport"].ConnectionString))
-    //    {
-    //        using (SqlCommand command = new SqlCommand("", conn))
-    //        {
-    //            try
-    //            {
-    //                conn.Open();
-
-    //                //Creating temp table on database
-    //                command.CommandText = "CREATE TABLE #TmpTable(...)";
-    //                command.ExecuteNonQuery();
-
-    //                //Bulk insert into temp table
-    //                using (SqlBulkCopy bulkcopy = new SqlBulkCopy(conn))
-    //                {
-    //                    bulkcopy.BulkCopyTimeout = 660;
-    //                    bulkcopy.DestinationTableName = "#TmpTable";
-    //                    bulkcopy.WriteToServer(dt);
-    //                    bulkcopy.Close();
-    //                }
-
-    //                // Updating destination table, and dropping temp table
-    //                command.CommandTimeout = 300;
-    //                command.CommandText = "UPDATE T SET ... FROM " + TableName + " T INNER JOIN #TmpTable Temp ON ...; DROP TABLE #TmpTable;";
-    //                command.ExecuteNonQuery();
-    //            }
-    //            catch (Exception ex)
-    //            {
-    //                // Handle exception properly
-    //            }
-    //            finally
-    //            {
-    //                conn.Close();
-    //            }
-    //        }
-    //    }
-    //}
+    using(SqlBulkCopy bulkCopy = new(connection))
+    {
+        bulkCopy.DestinationTableName = "#TmpTable";
+        bulkCopy.ColumnMappings.Add("OfferId", "OfferId");
+        bulkCopy.ColumnMappings.Add("Level1Id", "Level1Id");
+        bulkCopy.ColumnMappings.Add("Level2Id", "Level2Id");
+        bulkCopy.ColumnMappings.Add("Level3Id", "Level3Id");
+        bulkCopy.WriteToServer(table);
+        bulkCopy.Close();
+    }
+    
+    connection.Execute(@"
+        UPDATE Offers
+        SET Offers.CategoryLevel1Id = Tmp.Level1Id,
+            Offers.CategoryLevel2Id = Tmp.Level2Id,
+            Offers.CategoryLevel3Id = Tmp.Level3Id
+        FROM Offers INNER JOIN #TmpTable Tmp
+            ON Offers.Id = Tmp.OfferId", commandTimeout: 300);
+    connection.Execute("DROP TABLE #TmpTable");
 }
 
 (double latitude, double longitude) GenerateRandomGeography(Random random, double minLong, double maxLong, double minLat, double maxLat)

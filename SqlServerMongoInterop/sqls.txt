@@ -1,0 +1,76 @@
+﻿-- TEST 1. Return All offers in X km radius
+begin
+DECLARE @point GEOGRAPHY = geography::Point(51.380155, 12.494370, 4326);
+
+set statistics time on
+SELECT Id, Name
+FROM dbo.Offers o 
+WHERE o.Location.STDistance(@point) <= 100000
+set statistics time off
+end
+-- X = 10km, elapsed time 32ms, 1304 offers found
+-- X = 50km, elapsed time 203ms, 32311 offers found	
+-- X = 100km, elaspsed time 890ms, 129026 offers found
+
+-- TEST 2. Get X closest offers to given point
+begin
+DECLARE @point GEOGRAPHY = geography::Point(51.380155, 12.494370, 4326);
+
+set statistics time on
+
+SELECT TOP 10 Id, Name, Location
+FROM dbo.Offers o
+WHERE o.Location.STDistance(@point) IS NOT NULL
+ORDER BY o.Location.STDistance(@point)
+
+set statistics time off
+end
+
+-- X = 10, elapsed time < 1ms
+-- X = 100, elapsed time 63ms
+-- X = 1000, elapsed time 422ms
+
+-- TEST 3. Return all offers in Xkm radius around sample point with given Level1 category 
+begin
+DECLARE @point GEOGRAPHY = geography::Point(51.380155, 12.494370, 4326);
+
+set statistics time on
+SELECT Id, Name
+FROM dbo.Offers o 
+WHERE CategoryLevel1Id = 10 AND o.Location.STDistance(@point) <= 50000
+set statistics time off
+end
+
+-- X = 10km, elapsed time 31ms, 78 offers found
+-- X = 50km, elapsed time 109ms, 1618 offers found
+-- X = 100km, elapsed time 375ms, 6422 offers found
+
+-- TEST 4. Return all offers in Xkm radius around sample point with given Level2 category 
+begin
+DECLARE @point GEOGRAPHY = geography::Point(51.380155, 12.494370, 4326);
+
+set statistics time on
+SELECT Id, Name
+FROM dbo.Offers o 
+WHERE CategoryLevel2Id = 37 AND o.Location.STDistance(@point) <= 50000
+set statistics time off
+end
+
+-- X = 10km, elapsed time 31ms, 7 offers found
+-- X = 50km, elapsed time 125ms, 180 offers found
+-- X = 100km, elapsed time 375ms, 654 offers found
+
+-- TEST 5. Return all offers in Xkm radius around sample point with given Level3 category 
+begin
+DECLARE @point GEOGRAPHY = geography::Point(51.380155, 12.494370, 4326);
+
+set statistics time on
+SELECT Id, Name
+FROM dbo.Offers o 
+WHERE CategoryLevel3Id = 937 AND o.Location.STDistance(@point) <= 50000
+set statistics time off
+end
+
+-- X = 10km, elapsed time 16ms, 1 offer found
+-- X = 50km, elapsed time 94ms, 27 offers found
+-- X = 100km, elapsed time 312ms, 125 offers found
