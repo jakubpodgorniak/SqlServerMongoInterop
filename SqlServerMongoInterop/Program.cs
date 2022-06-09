@@ -1,6 +1,7 @@
 ﻿using System.Data;
 using System.Data.SqlClient;
 using System.Diagnostics;
+using System.Text;
 using Bogus;
 using Dapper;
 using Microsoft.SqlServer.Types;
@@ -14,7 +15,7 @@ const double MostNorthLat = 54.84800488971114;
 const double MostWestLong = 6.026129589265816;
 const double MostEastLong = 14.540386639801365;
 
-using SqlConnection connection = new ("Server=.\\SQLEXPRESS;Database=ServicePortal4;Integrated Security=true;");
+using SqlConnection connection = new ("Data Source=DESKTOP-P04REE9;Database=ServicePortal;Integrated Security=true;");
 connection.Open();
 
 var client = new MongoClient("mongodb://localhost:27017");
@@ -25,17 +26,19 @@ var faker = new Faker();
 var random = new Random();
 
 //GenerateSqlOffersFromNoSql();
-//InsertNewRandomOffers(count: 10000, repeats: 200);
+//InsertNewRandomOffers(File.ReadAllLines("words.txt"), count: 10000, repeats: 200);
+//InsertKeywords(File.ReadAllLines("words.txt"));
 //GenerateCategories();
 //AssignRandomCategories();
+AssignKeywords();
 
 //RepeatTest(() => Test1_GetAllOffersInRadius(10000, 51.380155, 12.493470), 10);
 //RepeatTest(() => Test1_GetAllOffersInRadius(50000, 51.380155, 12.493470), 10);
 //RepeatTest(() => Test1_GetAllOffersInRadius(100000, 51.380155, 12.493470), 10);
-RepeatTest(() => Test2_GetClosestsOffers(100, 51.380155, 12.493470), 10);
-RepeatTest(() => Test5_GetAllOffersInRadiusWithLevel3Category(10000, 37, 51.380155, 12.493470), 10);
-RepeatTest(() => Test5_GetAllOffersInRadiusWithLevel3Category(50000, 37, 51.380155, 12.493470), 10);
-RepeatTest(() => Test5_GetAllOffersInRadiusWithLevel3Category(100000, 37, 51.380155, 12.493470), 10);
+//RepeatTest(() => Test2_GetClosestsOffers(100, 51.380155, 12.493470), 10);
+//RepeatTest(() => Test5_GetAllOffersInRadiusWithLevel3Category(10000, 37, 51.380155, 12.493470), 10);
+//RepeatTest(() => Test5_GetAllOffersInRadiusWithLevel3Category(50000, 37, 51.380155, 12.493470), 10);
+//RepeatTest(() => Test5_GetAllOffersInRadiusWithLevel3Category(100000, 37, 51.380155, 12.493470), 10);
 //RepeatTest(() => Test2_GetClosestsOffers(100, 51.380155, 12.493470), 10);
 //RepeatTest(() => Test2_GetClosestsOffers(1000, 51.380155, 12.493470), 10);
 
@@ -152,8 +155,6 @@ void RepeatTest(Func<double> test, int repeats)
 
 async Task GenerateSqlOffersFromNoSql()
 {
-    Stopwatch sw = Stopwatch.StartNew();
-
     const int BufferSize = 100000;
 
     DataTable table = new DataTable();
@@ -206,11 +207,9 @@ async Task GenerateSqlOffersFromNoSql()
     bulkCopy.WriteToServer(table);
 
     table.Clear();
-
-    sw.Stop();
 }
 
-void InsertNewRandomOffers(int count, int repeats)
+void InsertNewRandomOffers(string[] words, int count, int repeats)
 {
     var offers = new List<Offer>(count);
 
@@ -219,17 +218,27 @@ void InsertNewRandomOffers(int count, int repeats)
         offers.Add(new());
     }
 
+    var sb = new StringBuilder();
+
     for (int i = 0; i < repeats; i++)
     {
         for (int j = 0; j < count; j++)
         {
+            sb.Append(words[random.Next(0, words.Length)])
+                .Append(' ')
+                .Append(words[random.Next(0, words.Length)])
+                .Append(' ')
+                .Append(words[random.Next(0, words.Length)]);
+
             var (latitude, longitude) = GenerateRandomGeography(random, MostWestLong, MostEastLong, MostSouthLat, MostNorthLat);
             offers[j].Id = ObjectId.Empty;
-            offers[j].Name = faker.Commerce.ProductName();
+            offers[j].Name = sb.ToString();
             offers[j].Description = faker.Commerce.ProductDescription();
             offers[j].Location = GeoJson.Point(GeoJson.Geographic(longitude, latitude));
             offers[j].Active = true;
             offers[j].Rating = random.Next(1, 5);
+
+            sb.Clear();
         }
 
         collection.InsertMany(offers);
@@ -279,6 +288,32 @@ void AssignRandomCategories()
         FROM Offers INNER JOIN #TmpTable Tmp
             ON Offers.Id = Tmp.OfferId", commandTimeout: 300);
     connection.Execute("DROP TABLE #TmpTable");
+}
+
+void AssignKeywords()
+{
+    DataTable table = new DataTable();
+    table.Columns.Add("OfferId", typeof(int));
+    table.Columns.Add("KeywordId", typeof(int));
+
+    var keywordsByWord = connection.Query<Keyword>("SELECT * FROM Keywords").ToDictionary(x => x.Word);
+
+    foreach (var offerName in connection.Query<OfferName>("SELECT Id, Name FROM Offers"))
+    {
+        var offerNameKeywords = offerName.Name.Split(null);
+
+        foreach (var offerNameKeyword in offerNameKeywords)
+        {
+            table.Rows.Add(offerName.Id, keywordsByWord[offerNameKeyword].Id);
+        }
+    }
+
+    using var innerBulkCopy = new SqlBulkCopy(connection);
+    innerBulkCopy.DestinationTableName = "OffersKeywords";
+    innerBulkCopy.ColumnMappings.Add("OfferId", "OfferId");
+    innerBulkCopy.ColumnMappings.Add("KeywordId", "KeywordId");
+    innerBulkCopy.WriteToServer(table);
+    table.Clear();
 }
 
 (double latitude, double longitude) GenerateRandomGeography(Random random, double minLong, double maxLong, double minLat, double maxLat)
@@ -333,6 +368,17 @@ void GenerateCategories()
     }
 }
 
+void InsertKeywords(string[] words)
+{
+    var keywords = new Keyword[words.Length];
+    for (int i = 0; i < keywords.Length; i++)
+    {
+        keywords[i] = new() { Word = words[i] };
+    }
+
+    connection.Execute("INSERT INTO Keywords(Word) VALUES(@Word)", keywords);
+}
+
 class Offer
 {
     public ObjectId Id { get; set; }
@@ -384,4 +430,18 @@ class CategoryIdSequence
     public int Level2Id { get; set; }
 
     public int Level3Id { get; set;}
+}
+
+class Keyword
+{
+    public int Id { get; set; }
+
+    public string Word { get; set; }
+}
+
+class OfferName
+{
+    public int Id  { get; set; }
+
+    public string Name { get; set;}
 }
