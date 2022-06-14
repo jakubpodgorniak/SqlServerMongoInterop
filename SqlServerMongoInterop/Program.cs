@@ -25,12 +25,19 @@ var collection = db.GetCollection<Offer>("Offers");
 var faker = new Faker();
 var random = new Random();
 
-//GenerateSqlOffersFromNoSql();
+//collection.DeleteMany(_ => true);
 //InsertNewRandomOffers(File.ReadAllLines("words.txt"), count: 10000, repeats: 200);
-//InsertKeywords(File.ReadAllLines("words.txt"));
 //GenerateCategories();
+GenerateRandomSqlOffers(1_999_990, File.ReadAllLines("german-words.txt"));
 //AssignRandomCategories();
-AssignKeywords();
+//InsertKeywords(File.ReadAllLines("words.txt"));
+//AssignKeywords();
+//InsertKeywords(File.ReadAllLines("words.txt"), 1);
+//InsertKeywords(File.ReadAllLines("words.txt"), 2);
+//InsertKeywords(File.ReadAllLines("words.txt"), 3);
+//InsertKeywords(File.ReadAllLines("words.txt"), 4);
+//InsertKeywords(File.ReadAllLines("words.txt"), 5);
+//InsertKeywords(File.ReadAllLines("words.txt"), 6);
 
 //RepeatTest(() => Test1_GetAllOffersInRadius(10000, 51.380155, 12.493470), 10);
 //RepeatTest(() => Test1_GetAllOffersInRadius(50000, 51.380155, 12.493470), 10);
@@ -153,7 +160,7 @@ void RepeatTest(Func<double> test, int repeats)
     WriteLine();
 }
 
-async Task GenerateSqlOffersFromNoSql()
+async Task GenerateRandomSqlOffers(int count, string[] words)
 {
     const int BufferSize = 100000;
 
@@ -162,16 +169,24 @@ async Task GenerateSqlOffersFromNoSql()
     table.Columns.Add("Location", typeof(SqlGeography));
     table.Columns.Add("Rating", typeof(int));
     table.Columns.Add("Active", typeof(bool));
-    table.Columns.Add("OfferDetailsId", typeof(byte[]));
+    //table.Columns.Add("OfferDetailsId", typeof(byte[]));
 
-    foreach (var offer in collection.AsQueryable())
+    var sb = new StringBuilder();
+    for (int i = 0; i < count; i++)
     {
+        var offerName = sb.Append(words[random.Next(0, words.Length)])
+            .Append(' ')
+            .Append(words[random.Next(0, words.Length)])
+            .Append(' ')
+            .Append(words[random.Next(0, words.Length)])
+            .ToString();
+        sb.Clear();
+        var (latitude, longitude) = GenerateRandomGeography(random, MostWestLong, MostEastLong, MostSouthLat, MostNorthLat);
         table.Rows.Add(
-            offer.Name,
-            SqlGeography.Point(offer.Location.Coordinates.Latitude, offer.Location.Coordinates.Longitude, 4326),
-            offer.Rating,
-            offer.Active,
-            offer.Id.ToByteArray());
+            offerName,                                      // Name
+            SqlGeography.Point(latitude, longitude, 4326),  // Location
+            random.Next(1, 6),                              // Rating
+            true);                                          // Active
 
         if (table.Rows.Count == BufferSize)
         {
@@ -181,7 +196,7 @@ async Task GenerateSqlOffersFromNoSql()
             innerBulkCopy.ColumnMappings.Add("Location", "Location");
             innerBulkCopy.ColumnMappings.Add("Rating", "Rating");
             innerBulkCopy.ColumnMappings.Add("Active", "Active");
-            innerBulkCopy.ColumnMappings.Add("OfferDetailsId", "OfferDetailsId");
+            //innerBulkCopy.ColumnMappings.Add("OfferDetailsId", "OfferDetailsId");
 
             try
             {
@@ -197,14 +212,55 @@ async Task GenerateSqlOffersFromNoSql()
         }
     }
 
+    //foreach (var offer in collection.AsQueryable())
+    //{
+    //    table.Rows.Add(
+    //        offer.Name,
+    //        SqlGeography.Point(offer.Location.Coordinates.Latitude, offer.Location.Coordinates.Longitude, 4326),
+    //        offer.Rating,
+    //        offer.Active,
+    //        offer.Id.ToByteArray());
+
+    //    if (table.Rows.Count == BufferSize)
+    //    {
+    //        using var innerBulkCopy = new SqlBulkCopy(connection);
+    //        innerBulkCopy.DestinationTableName = "Offers";
+    //        innerBulkCopy.ColumnMappings.Add("Name", "Name");
+    //        innerBulkCopy.ColumnMappings.Add("Location", "Location");
+    //        innerBulkCopy.ColumnMappings.Add("Rating", "Rating");
+    //        innerBulkCopy.ColumnMappings.Add("Active", "Active");
+    //        innerBulkCopy.ColumnMappings.Add("OfferDetailsId", "OfferDetailsId");
+
+    //        try
+    //        {
+    //            innerBulkCopy.WriteToServer(table);
+    //        }
+    //        catch (Exception ex)
+    //        {
+    //            WriteLine(ex.Message);
+    //            throw;
+    //        }
+
+    //        table.Clear();
+    //    }
+    //}
+
     using var bulkCopy = new SqlBulkCopy(connection);
     bulkCopy.DestinationTableName = "Offers";
     bulkCopy.ColumnMappings.Add("Name", "Name");
     bulkCopy.ColumnMappings.Add("Location", "Location");
     bulkCopy.ColumnMappings.Add("Rating", "Rating");
     bulkCopy.ColumnMappings.Add("Active", "Active");
-    bulkCopy.ColumnMappings.Add("OfferDetailsId", "OfferDetailsId");
-    bulkCopy.WriteToServer(table);
+    //bulkCopy.ColumnMappings.Add("OfferDetailsId", "OfferDetailsId");
+    try
+    {
+        bulkCopy.WriteToServer(table);
+    }
+    catch (Exception ex)
+    {
+        WriteLine(ex.Message);
+        throw;
+    }
 
     table.Clear();
 }
@@ -300,7 +356,7 @@ void AssignKeywords()
 
     foreach (var offerName in connection.Query<OfferName>("SELECT Id, Name FROM Offers"))
     {
-        var offerNameKeywords = offerName.Name.Split(null);
+        var offerNameKeywords = offerName.Name.Split(null).Distinct();
 
         foreach (var offerNameKeyword in offerNameKeywords)
         {
@@ -312,6 +368,7 @@ void AssignKeywords()
     innerBulkCopy.DestinationTableName = "OffersKeywords";
     innerBulkCopy.ColumnMappings.Add("OfferId", "OfferId");
     innerBulkCopy.ColumnMappings.Add("KeywordId", "KeywordId");
+    innerBulkCopy.BulkCopyTimeout = 1000;
     innerBulkCopy.WriteToServer(table);
     table.Clear();
 }
@@ -368,15 +425,38 @@ void GenerateCategories()
     }
 }
 
-void InsertKeywords(string[] words)
+void InsertKeywords(string[] words, int? append = null)
 {
     var keywords = new Keyword[words.Length];
-    for (int i = 0; i < keywords.Length; i++)
+    
+    if (append is null)
     {
-        keywords[i] = new() { Word = words[i] };
+        for (int i = 0; i < keywords.Length; i++)
+        {
+            keywords[i] = new() { Word = words[i] };
+        }
+    }
+    else
+    {
+        for (int i = 0; i < keywords.Length; i++)
+        {
+            keywords[i] = new() { Word = words[i] + append.ToString() };
+        }
     }
 
     connection.Execute("INSERT INTO Keywords(Word) VALUES(@Word)", keywords);
+}
+
+void RemovePopularity(string[] lines)
+{
+    var newLines = new string[lines.Length];
+
+    for (int i = 0; i < lines.Length; i++)
+    {
+        newLines[i] = lines[i].Split(null)[0];
+    }
+
+    File.WriteAllLines("german-words.txt", newLines);
 }
 
 class Offer
